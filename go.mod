@@ -1,4 +1,4 @@
-module github.com/dgraph-io/ristretto
+module github.com/rbretecher-voodoo/ristretto
 
 go 1.12
 
