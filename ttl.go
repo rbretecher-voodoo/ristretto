@@ -43,11 +43,13 @@ type bucket map[uint64]uint64
 type expirationMap struct {
 	sync.RWMutex
 	buckets map[int64]bucket
+	clock   Clock
 }
 
-func newExpirationMap() *expirationMap {
+func newExpirationMap(clock Clock) *expirationMap {
 	return &expirationMap{
 		buckets: make(map[int64]bucket),
+		clock:   clock,
 	}
 }
 
@@ -120,7 +122,7 @@ func (m *expirationMap) cleanup(store store, policy policy, onEvict itemCallback
 	}
 
 	m.Lock()
-	now := time.Now()
+	now := m.clock.Now()
 	bucketNum := cleanupBucket(now)
 	keys := m.buckets[bucketNum]
 	delete(m.buckets, bucketNum)

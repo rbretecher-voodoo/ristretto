@@ -75,6 +75,8 @@ type Cache struct {
 	ignoreInternalCost bool
 	// cleanupTicker is used to periodically check for entries whose TTL has passed.
 	cleanupTicker *time.Ticker
+	// clock is an interface used to control time in tests.
+	clock Clock
 	// Metrics contains a running log of important statistics like hits, misses,
 	// and dropped items.
 	Metrics *Metrics
@@ -135,6 +137,8 @@ type Config struct {
 	// cost passed to set is not using bytes as units. Keep in mind that setting
 	// this to true will increase the memory usage.
 	IgnoreInternalCost bool
+	// Clock is an interface used to control time in tests.
+	Clock Clock
 }
 
 type itemFlag byte
@@ -167,8 +171,14 @@ func NewCache(config *Config) (*Cache, error) {
 		return nil, errors.New("BufferItems can't be zero")
 	}
 	policy := newPolicy(config.NumCounters, config.MaxCost)
+
+	clock := config.Clock
+	if clock == nil {
+		clock = NewRealClock()
+	}
+
 	cache := &Cache{
-		store:              newStore(),
+		store:              newStore(clock),
 		policy:             policy,
 		getBuf:             newRingBuffer(policy, config.BufferItems),
 		setBuf:             make(chan *Item, setBufSize),
@@ -177,6 +187,7 @@ func NewCache(config *Config) (*Cache, error) {
 		cost:               config.Cost,
 		ignoreInternalCost: config.IgnoreInternalCost,
 		cleanupTicker:      time.NewTicker(time.Duration(bucketDurationSecs) * time.Second / 2),
+		clock:              clock,
 	}
 	cache.onExit = func(val interface{}) {
 		if config.OnExit != nil && val != nil {
@@ -269,7 +280,7 @@ func (c *Cache) SetWithTTL(key, value interface{}, cost int64, ttl time.Duration
 		// Treat this a no-op.
 		return false
 	default:
-		expiration = time.Now().Add(ttl)
+		expiration = c.clock.Now().Add(ttl)
 	}
 
 	keyHash, conflictHash := c.keyToHash(key)
@@ -342,7 +353,7 @@ func (c *Cache) GetTTL(key interface{}) (time.Duration, bool) {
 		return 0, true
 	}
 
-	if time.Now().After(expiration) {
+	if c.clock.Now().After(expiration) {
 		// found but expired
 		return 0, false
 	}
@@ -430,7 +441,7 @@ func (c *Cache) processItems() {
 		if c.Metrics == nil {
 			return
 		}
-		startTs[key] = time.Now()
+		startTs[key] = c.clock.Now()
 		if len(startTs) > numToKeep {
 			for k := range startTs {
 				if len(startTs) <= numToKeep {

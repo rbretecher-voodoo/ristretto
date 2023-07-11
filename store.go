@@ -56,8 +56,8 @@ type store interface {
 }
 
 // newStore returns the default store implementation.
-func newStore() store {
-	return newShardedMap()
+func newStore(clock Clock) store {
+	return newShardedMap(clock)
 }
 
 const numShards uint64 = 256
@@ -65,15 +65,17 @@ const numShards uint64 = 256
 type shardedMap struct {
 	shards    []*lockedMap
 	expiryMap *expirationMap
+	clock     Clock
 }
 
-func newShardedMap() *shardedMap {
+func newShardedMap(clock Clock) *shardedMap {
 	sm := &shardedMap{
 		shards:    make([]*lockedMap, int(numShards)),
-		expiryMap: newExpirationMap(),
+		expiryMap: newExpirationMap(clock),
+		clock:     clock,
 	}
 	for i := range sm.shards {
-		sm.shards[i] = newLockedMap(sm.expiryMap)
+		sm.shards[i] = newLockedMap(sm.expiryMap, clock)
 	}
 	return sm
 }
@@ -115,14 +117,16 @@ func (sm *shardedMap) Clear(onEvict itemCallback) {
 
 type lockedMap struct {
 	sync.RWMutex
-	data map[uint64]storeItem
-	em   *expirationMap
+	data  map[uint64]storeItem
+	em    *expirationMap
+	clock Clock
 }
 
-func newLockedMap(em *expirationMap) *lockedMap {
+func newLockedMap(em *expirationMap, clock Clock) *lockedMap {
 	return &lockedMap{
-		data: make(map[uint64]storeItem),
-		em:   em,
+		data:  make(map[uint64]storeItem),
+		em:    em,
+		clock: clock,
 	}
 }
 
@@ -138,7 +142,7 @@ func (m *lockedMap) get(key, conflict uint64) (interface{}, bool) {
 	}
 
 	// Handle expired items.
-	if !item.expiration.IsZero() && time.Now().After(item.expiration) {
+	if !item.expiration.IsZero() && m.clock.Now().After(item.expiration) {
 		return nil, false
 	}
 	return item.value, true
